@@ -164,8 +164,8 @@ This interactive map of Ottawa displays census dissemination areas (DAs), each v
 
 - **Average Total Household Income** – The average income of residents within each DA. This comes from the column `v_CA21_1004: Average total income in 2020 ($)` in the `ottawa_census_sf` data frame.
 - **Total Number of Bus Stops** – The number of OC Transpo bus stops located in each DA. This we get from finding the intersection of `stops_sf` and `ottawa_census_sf` data frames, after converting them both to the same longitude/latitude system.
-- **Vehicle Use Ratio** – The percentage of residents who reported driving a car, truck, or van to work. We add this as a column to `ottawa_census_sf` by the following operation: $$\text{DA vehicle use ratio} = \frac{\text{DA population in the Car, Truck, or Van column }}{\text{Total DA population}}$$
-- **Bus Stops per Square Kilometer** – A measure of transit stop density within each DA. We add this as a column to `ottawa_census_sf` by the following operation: $$\text{Bus Stops per sq km} = \frac{\text{Total bus stops in the DA }}{\text{Area of the DA (sq km)}}$$
+- **Vehicle Use Ratio** – The percentage of residents who reported driving a car, truck, or van to work. We add this as a column to `ottawa_census_sf` with the following operation: $$\text{DA vehicle use ratio} = \frac{\text{DA population in the Car, Truck, or Van column }}{\text{Total DA population}}$$
+- **Bus Stops per Square Kilometer** – A measure of transit stop density within each DA. We add this as a column to `ottawa_census_sf` with the following operation: $$\text{Bus Stops per sq km} = \frac{\text{Total bus stops in the DA }}{\text{Area of the DA (sq km)}}$$
 - **DA Area** – The total area of each census dissemination area for reference.
 
 This visualization provides insights into public transit accessibility and its relationship with income and car dependency across Ottawa. Notably, the Vehicle Use Ratio layer indicates a higher rate of personal vehicle usage in areas further from central Ottawa (darker coloring in these areas). This suggests a potential link between transit availability and commuting habits.
