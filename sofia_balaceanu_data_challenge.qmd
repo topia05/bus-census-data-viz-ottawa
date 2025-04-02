@@ -1,0 +1,265 @@
+---
+title: "Visualizations of OC Transpo Data Against Canada Census Data"
+author: "Sofia Balaceanu"
+date: "`r Sys.Date()`"
+format: html
+editor: visual
+---
+
+## About the Data
+
+The data used in this analysis is sourced from:
+
+ - OC Transpo's General Transit Feed Specification (GTFS), which provides detailed information on Ottawa's public transportation system, including bus stop locations, route frequencies, and trip schedules[^1].
+- Statistics Canada’s Census Data, accessed via the `cancensus` R package, which provides demographic and socioeconomic information at the dissemination area level, including population density, income levels, and commuting patterns.
+
+[^1]: This data is only valid until April 27th, as OC Transpo is updating their bus network. 
+
+```{r}
+#| include: false
+
+knitr::opts_knit$set(root.dir = "C:/Users/sofia/OneDrive/Documents/Rladies/GTFSExport")
+```
+
+## Libraries
+
+```{r}
+#| warning: false
+#| output: false
+library(leaflet) 
+library(tidyverse)
+library(sf)
+library(cancensus)
+library(sp)
+library(ggplot2)
+```
+
+
+## Data Acquisition
+
+The following code loads and organizes the original data sets. The vectors specified in the `get_census()` function refer to columns grabbed from `cancensus`. In this case, `v_CA21_1004` refers to average total household income, and `v_CA21_7635` refers to number of respondents who reported using a car, truck, or van as main mode of transportation to their workplace. Note that `dataset="CA21"` specifies the data comes from the 2021 Canadian Census. 
+
+```{r}
+#| warning: false
+#| output: false
+# Load file of all OC Transpo bus stops
+stops <- read_csv("stops.txt") 
+
+# Load 2021 census data (for Ottawa) with average income and car as main mode of transportation
+ottawa_census_sf <- get_census(dataset = "CA21",
+                               regions = list(CSD = "3506008"),
+                               vectors = c("v_CA21_1004", "v_CA21_7635"),
+                               level = "DA",
+                               use_cache = TRUE, geo_format = 'sf')
+
+# Transform coordinate system (CRS) to latitude/longitude 
+ottawa_census_sf$geometry <- st_transform(ottawa_census_sf$geometry, CRS("+init=epsg:4326"))
+```
+
+## Visualizing Ottawa's Bus Stops and Census Dissemination Areas
+```{r}
+leaflet() |> 
+  addTiles() |> 
+  addPolygons(data = ottawa_census_sf$geometry, color = "violet", popup = ottawa_census_sf$GeoUID) |>
+  addCircleMarkers(data = stops,
+                   lng = ~stop_lon,
+                   lat = ~stop_lat,
+                   radius = 4,
+                   popup = ~stop_name,
+                   fillOpacity = 0.7,
+                   color = 'cornflowerblue')
+```
+
+<br />
+This interactive map displays all census dissemination areas (DAs) in Ottawa, outlined in `"violet"`, and OC Transpo bus stops, marked in `"cornflower blue"`. Each DA is labeled with its unique identifier (GeoUID), while each bus stop is labeled with its stop name. 
+
+This is a basic map, but there are many ways to enhance it with more meaningful insights. For example, I am interested in analyzing the number of bus stops per census area, the average income per polygon, and other transit-related patterns. Below is the code that incorporates these elements into the map.
+
+## Mapping Transit Accessibility and Socioeconomic Factors in Ottawa
+```{r}
+# Transform stops coordinate system to the same one as ottawa_census_sf to facilitate merging
+stops_sf <- st_as_sf(stops, coords = c("stop_lon", "stop_lat"), crs=CRS("+init=epsg:4326"))
+stops_sf <- st_transform(stops_sf$geometry, CRS("+init=epsg:4326"))
+
+# Count total bus stops in each census polygon
+stops_per_polygon <- st_intersects(ottawa_census_sf, stops_sf) |> 
+  lengths() 
+
+# Add as a new column to census data
+ottawa_census_sf$stop_count <- stops_per_polygon
+
+# Add bus stop ratio column 
+ottawa_census_sf$stop_ratio <- ottawa_census_sf$stop_count / ottawa_census_sf$`Shape Area`
+
+# Add average income column 
+ottawa_census_sf$avg_income <- as.numeric(ottawa_census_sf$`v_CA21_1004: Average total income in 2020 ($)`)
+
+# Add vehicle use ratio per polygon column
+ottawa_census_sf$vehicle_ratio <- ottawa_census_sf$`v_CA21_7635: Car, truck or van` / ottawa_census_sf$Population
+
+# The map with avg income, bus stop count, and bus stop layer
+leaflet() |> 
+  addTiles() |> 
+  # Layer for bus stop count
+  addPolygons(data = ottawa_census_sf, 
+              fillColor = ~colorNumeric("Blues", stop_count)(stop_count),
+              color = "black", 
+              fillOpacity = 0.7, 
+              group = "Total Stops",
+              popup = ~paste("Avg Total Income: $", format(avg_income, big.mark=","), 
+                             "<br />", "Total Stops: ", format(stop_count, big.mark=","), 
+                             "<br />", "Vehicle Use Ratio (%): ", format(round(vehicle_ratio,3)*100, big.mark=","), 
+                             "<br />", "Stop per sq km: ", format(round(stop_ratio,3), big.mark=","),
+                             "<br />", "Area (sq km): ", format(`Shape Area`, big.mark=","))) |>
+  
+  # Layer for Stop per sq km
+  addPolygons(data = ottawa_census_sf, 
+              fillColor = ~colorNumeric("Oranges", vehicle_ratio)(vehicle_ratio),
+              color = "black", 
+              fillOpacity = 0.7, 
+              group = "Vehicle Use Ratio (%)",
+              popup = ~paste("Avg Total Income: $", format(avg_income, big.mark=","), 
+                             "<br />", "Total Stops: ", format(stop_count, big.mark=","), 
+                             "<br />", "Vehicle Use Ratio (%): ", format(round(vehicle_ratio,3)*100, big.mark=","), 
+                             "<br />", "Stop per sq km: ", format(round(stop_ratio,3), big.mark=","),
+                             "<br />", "Area (sq km): ", format(`Shape Area`, big.mark=","))) |>
+  
+  # Layer for Avg Total Income (overlay vehicle ratio and bus stop count as well)
+  addPolygons(data = ottawa_census_sf, 
+              fillColor = ~colorNumeric("Reds", avg_income)(avg_income),
+              color = "black", 
+              fillOpacity = 0.7, 
+              group = "Avg Total Income",
+              popup = ~paste("Avg Total Income: $", format(avg_income, big.mark=","), 
+                             "<br />", "Total Stops: ", format(stop_count, big.mark=","), 
+                             "<br />", "Vehicle Use Ratio (%): ", format(round(vehicle_ratio,3)*100, big.mark=","), 
+                             "<br />", "Stop per sq km: ", format(round(stop_ratio,3), big.mark=","),
+                             "<br />", "Area (sq km): ", format(`Shape Area`, big.mark=","))) |> 
+  
+  addPolygons(data = ottawa_census_sf,
+              fillColor = ~colorNumeric("Blues", stop_ratio, domain = c(0,max(stop_ratio)))(stop_ratio),
+              color = "black",
+              fillOpacity = 0.7,
+              group = "Stop per sq km",
+              popup = ~paste("Avg Total Income: $", format(avg_income, big.mark=","), 
+                             "<br />", "Total Stops: ", format(stop_count, big.mark=","), 
+                             "<br />", "Vehicle Use Ratio (%): ", format(round(vehicle_ratio,3)*100, big.mark=","), 
+                             "<br />", "Stop per sq km: ", format(round(stop_ratio,3), big.mark=","),
+                             "<br />", "Area (sq km): ", format(`Shape Area`, big.mark=","))) |>
+  # Layer for Area (sq km)
+  addPolygons(data = ottawa_census_sf,
+              color = "black",
+              group = "Area (sq km)",
+              popup = ottawa_census_sf$`Shape Area`) |>
+  
+  # Layer control to toggle between layers
+  addLayersControl(
+    baseGroups = c("Total Stops", "Avg Total Income", "Vehicle Use Ratio (%)", "Stop per sq km"),
+    options = layersControlOptions(collapsed = FALSE)
+  )
+```
+
+
+This interactive map of Ottawa displays census dissemination areas (DAs), each visualized using a color gradient to represent key socioeconomic and transit-related factors. Users can toggle between different layers using the control panel to explore the following metrics:
+
+- **Average Total Household Income** – The average income of residents within each DA. This comes from the column `v_CA21_1004: Average total income in 2020 ($)` in the `ottawa_census_sf` data frame.
+- **Total Number of Bus Stops** – The number of OC Transpo bus stops located in each DA. This we get from finding the intersection of `stops_sf` and `ottawa_census_sf` data frames, after converting them both to the same longitude/latitude system.
+- **Vehicle Use Ratio** – The percentage of residents who reported driving a car, truck, or van to work. We add this as a column to `ottawa_census_sf` by the following operation: $$\text{DA vehicle use ratio} = \frac{\text{DA population in the Car, Truck, or Van column }}{\text{Total DA population}}$$
+- **Bus Stops per Square Kilometer** – A measure of transit stop density within each DA. We add this as a column to `ottawa_census_sf` by the following operation: $$\text{Bus Stops per sq km} = \frac{\text{Total bus stops in the DA }}{\text{Area of the DA (sq km)}}$$
+- **DA Area** – The total area of each census dissemination area for reference.
+
+This visualization provides insights into public transit accessibility and its relationship with income and car dependency across Ottawa. Notably, the Vehicle Use Ratio layer indicates a higher rate of personal vehicle usage in areas further from central Ottawa (darker coloring in these areas). This suggests a potential link between transit availability and commuting habits.
+
+To deepen the analysis, we can further explore these relationships using statistical graphs and charts. 
+
+## Relationship Between Vehicle Usage and Bus Stop Density in Ottawa
+
+```{r}
+#| warning: false
+ggplot(ottawa_census_sf, aes(x = stop_ratio, y = vehicle_ratio*100)) + 
+  geom_point(aes(color = vehicle_ratio*100), size = 2, ) +
+  geom_smooth(method = "lm", color = "yellow", se = TRUE) +
+  labs(title = "Vehicle Usage Ratio vs. Bus Stop Ratio",
+       x = "Number of Bus Stops per sq km",
+       y = "% of DA pop. driving to work", 
+       color = "% Driving") + 
+  xlim(c(0,80))+ # limit x scale to 80 for clarity 
+  theme_minimal() +
+  scale_color_viridis_c()
+
+# Computing the correlation
+cor(ottawa_census_sf$stop_ratio, ottawa_census_sf$vehicle_ratio, use = "complete.obs")
+```
+This scatter plot visualizes the relationship between the number of bus stops per square kilometer (`stop_ratio`) and the percentage of people who commute to work by car, truck, or van (`vehicle_ratio*100`) in different DAs of Ottawa.
+
+- **Trend:** The fitted yellow regression line suggests a negative correlation, meaning that as the number of bus stops per square kilometer increases, the percentage of people who drive to work tends to decrease.
+- **Color Gradient:** The color gradient represents the vehicle usage percentage, with darker colors indicating areas where a higher proportion of the population commutes by personal vehicle.
+- **Correlation Coefficient (`cor`):** The computed correlation value is relatively weak (cor $\approx -0.217$), indicating only a slight negative relationship between bus stop density and vehicle usage. 
+
+## Relationship Between Income and Total Number of Bus Stops in Ottawa DAs
+
+```{r}
+#| warning: false
+# Plot of avg income vs. total number of bus stops per polygon
+ggplot(ottawa_census_sf, aes(y = stop_count, x = avg_income)) + 
+  geom_point(aes(color = avg_income), size = 2) + 
+  geom_smooth(method = "lm", color = "yellow", se = TRUE) +  # Add linear regression line
+  # color by income for additional visual insight
+  labs(title = "Avg Total Income per Polygon vs. Number of Bus Stops per Polygon",
+       y = "Number of Bus Stops per Polygon",
+       x = "Avg Total Income per Polygon") +
+  xlim(0,200000)+
+  ylim(0,40)+
+  theme_minimal() +
+  scale_color_viridis_c(option = "plasma",
+                        limits = c(min(ottawa_census_sf$avg_income, na.rm = TRUE), 
+                                   max(ottawa_census_sf$avg_income, na.rm = TRUE)-200000))
+
+# Calculate correlation
+cor(ottawa_census_sf$stop_count, ottawa_census_sf$avg_income, use = "complete.obs")
+```
+
+This scatter plot visualizes the relationship between the total number of bus stops (`stop_count`) and the average total income (`avg_income`) in different DAs of Ottawa.
+
+- **Trend & Correlation:** The computed correlation coefficient is very weak (cor $\approx 0.015$), suggesting that there is little to no strong linear relationship between income and the number of bus stops in a given area.
+
+## Relationship Between Income and Bus Stop Density in Ottawa DAs
+
+```{r}
+#| warning: false
+# Plot of stop ratio vs. total number of bus stops per polygon
+ggplot(ottawa_census_sf, aes(y = stop_ratio, x = avg_income)) + 
+  geom_point(aes(color = avg_income), size = 2) + 
+  geom_smooth(method = "lm", color = "yellow", se = TRUE) +  # Add linear regression line
+  # color by income for additional visual insight
+  labs(title = "Avg Total Income per Polygon vs. Number of Bus Stops per sq km",
+       y = "Number of Bus Stops per Polygon",
+       x = "Avg Total Income per Polygon") +
+  xlim(0,200000)+
+  ylim(0,40)+
+  theme_minimal() +
+  scale_color_viridis_c(option = "plasma",
+                        limits = c(min(ottawa_census_sf$avg_income, na.rm = TRUE), 
+                                   max(ottawa_census_sf$avg_income, na.rm = TRUE)-200000))
+
+# Calculate correlation
+cor(ottawa_census_sf$stop_ratio, ottawa_census_sf$avg_income, use = "complete.obs")
+```
+
+## Comparison of Average Income vs. Bus Stops (Total vs. Density)
+
+### What's the difference between the two plots? 
+
+The first plot compares total bus stops per dissemination area (DA) with average income. The second plot examines bus stop density (stops per square km) against income. The distinction is important because larger areas may have more bus stops in total but a lower density, whereas smaller areas may have fewer total stops but a higher density of transit coverage.
+
+### Correlation comparion
+The total stop count plot shows a weaker because DAs with extreme area values (very small or very large), which may have lower population densities, can still have a high number of stops. The bus stop density plot shows a stronger trend because it adjusts for the size of the area. 
+
+This suggests that high-income areas have fewer stops per sq km, reinforcing the idea that public transit infrastructure is denser in lower-income areas. 
+
+### Conclusion
+While the total stop count plot might suggest no clear trend, the density-adjusted plot provides a more meaningful analysis of transit accessibility and income.
+
+
+
+
